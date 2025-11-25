@@ -1,0 +1,79 @@
+import os
+import statsmodels.api as sm
+
+
+sarima_rmse = []
+sarima_wape = []
+for i, sid in enumerate(series_ids):
+y_train = obs_train[i]
+y_test = obs_test[i]
+try:
+# Simple automatic order selection could be used, but to keep runtime reasonable we'll use (1,1,1)(1,1,1,12)
+order = (1, 1, 1)
+seasonal_order = (1, 1, 1, FREQ)
+mod = sm.tsa.statespace.SARIMAX(y_train, order=order, seasonal_order=seasonal_order, enforce_stationarity=False, enforce_invertibility=False)
+res = mod.fit(disp=False)
+pred = res.get_forecast(steps=len(y_test)).predicted_mean
+except Exception as e:
+# Fallback: naive random walk forecast (last observed value)
+pred = np.repeat(y_train[-1], len(y_test))
+
+
+sarima_rmse.append(sqrt(mean_squared_error(y_test, pred)))
+sarima_wape.append(wape(y_test, pred))
+
+
+# Aggregate metrics
+metrics_df = pd.DataFrame({
+'series': series_ids,
+'group': [df[df['series'] == sid]['group'].iloc[0] for sid in series_ids],
+'hbssm_rmse': hbssm_rmse,
+'hbssm_wape': hbssm_wape,
+'sarima_rmse': sarima_rmse,
+'sarima_wape': sarima_wape
+})
+metrics_df.to_csv(os.path.join(OUTDIR, 'comparison_metrics.csv'), index=False)
+print(f"Saved comparison metrics to {OUTDIR}/comparison_metrics.csv")
+
+
+# Write a basic report markdown
+report_lines = [
+"# HBSSM Project Report",
+"\n",
+"## Dataset",
+f"Synthetic dataset: {DATA_CSV}",
+"\n",
+"## Model specification (brief)",
+"- Hierarchical priors on intercepts and slopes across groups and series.",
+"- Latent level constructed as cumulative sum of series-level slopes (approx state-space).",
+"- Seasonal Fourier terms with 2 harmonics and series-specific amplitudes.",
+"\n",
+"## Sampling & Convergence",
+f"Saved trace: {OUTDIR}/hbssm_trace.nc",
+f"Summary CSV: {OUTDIR}/hbssm_summary.csv",
+"Use arviz to inspect R-hat and ESS (values saved in summary CSV).",
+"\n",
+"## Forecast comparison",
+f"Per-series metrics saved to {OUTDIR}/comparison_metrics.csv",
+"\n",
+"## Notes on trade-offs",
+"- The hierarchical structure pools information across related series which typically helps small-sample forecasting and stabilizes seasonality/trend estimates.",
+"- HBSSM is more computationally expensive (MCMC sampling, higher memory) vs independent SARIMA per-series.",
+"- Model complexity gives more uncertainty quantification (posterior predictive intervals) which is valuable in inventory planning.",
+"\n",
+"## Next steps / suggestions",
+"- Increase MCMC draws and chains for more robust convergence (draws=2000+, tune=2000+).",
+"- Try Stan (cmdstanpy) for potentially faster sampling in some settings.",
+"- Use variational inference for faster approximate posterior if needed (with care).",
+]
+
+
+report_path = os.path.join(OUTDIR, 'hbssm_report.md')
+with open(report_path, 'w') as f:
+f.write('\n'.join(report_lines))
+
+
+print(f"Report written to {report_path}")
+
+
+print("All done. Check the `output/` folder for dataset, trace, summary, metrics and report.")
